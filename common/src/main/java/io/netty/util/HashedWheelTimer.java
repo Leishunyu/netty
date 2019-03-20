@@ -238,9 +238,13 @@ public class HashedWheelTimer implements Timer {
      * @throws IllegalArgumentException if either of {@code tickDuration} and {@code ticksPerWheel} is &lt;= 0
      */
     public HashedWheelTimer(
-            ThreadFactory threadFactory,
-            long tickDuration, TimeUnit unit, int ticksPerWheel, boolean leakDetection,
-            long maxPendingTimeouts) {
+            ThreadFactory threadFactory, // 用来创建worker线程
+            long tickDuration,// tick的时长，也就是指针多久转一格
+            TimeUnit unit, // tickDuration的时间单位
+            int ticksPerWheel, // 一圈有几格
+            boolean leakDetection, // 是否开启内存泄露检测
+            long maxPendingTimeouts  //最大挂起超时次数
+    ) {
 
         if (threadFactory == null) {
             throw new NullPointerException("threadFactory");
@@ -255,14 +259,18 @@ public class HashedWheelTimer implements Timer {
             throw new IllegalArgumentException("ticksPerWheel must be greater than 0: " + ticksPerWheel);
         }
 
-        // Normalize ticksPerWheel to power of two and initialize the wheel.
+        // 将ticksPerWheel标准化为2的幂并初始化轮子.
         wheel = createWheel(ticksPerWheel);
+        // 这是一个标示符，用来快速计算任务应该呆的格子。
+        // 我们知道，给定一个deadline的定时任务，其应该呆的格子=deadline%wheel.length.但是%操作是个相对耗时的操作，所以使用一种变通的位运算代替：
+        // 因为一圈的长度为2的n次方，mask = 2^n-1后低位将全部是1，然后deadline&mast == deadline%wheel.length
+        // java中的HashMap也是使用这种处理方法
         mask = wheel.length - 1;
 
-        // Convert tickDuration to nanos.
+        // 转换成纳秒处理
         long duration = unit.toNanos(tickDuration);
 
-        // Prevent overflow.
+        // 校验是否存在溢出。即指针转动的时间间隔不能太长而导致tickDuration*wheel.length>Long.MAX_VALUE
         if (duration >= Long.MAX_VALUE / wheel.length) {
             throw new IllegalArgumentException(String.format(
                     "tickDuration: %d (expected: 0 < tickDuration in nanos < %d",
@@ -279,8 +287,10 @@ public class HashedWheelTimer implements Timer {
             this.tickDuration = duration;
         }
 
+        // 创建worker线程
         workerThread = threadFactory.newThread(worker);
 
+        // 这里默认是启动内存泄露检测：当HashedWheelTimer实例超过当前cpu可用核数*4的时候，将发出警告
         leak = leakDetection || !workerThread.isDaemon() ? leakDetector.track(this) : null;
 
         this.maxPendingTimeouts = maxPendingTimeouts;
@@ -723,7 +733,7 @@ public class HashedWheelTimer implements Timer {
      * extra object creation is needed.
      */
     private static final class HashedWheelBucket {
-        // Used for the linked-list datastructure
+        // 用于链表数据结构
         private HashedWheelTimeout head;
         private HashedWheelTimeout tail;
 
