@@ -323,8 +323,9 @@ public class HashedWheelTimer implements Timer {
             throw new IllegalArgumentException(
                     "ticksPerWheel may not be greater than 2^30: " + ticksPerWheel);
         }
-
+        // 初始化ticksPerWheel的值为不小于ticksPerWheel的最小2的n次方
         ticksPerWheel = normalizeTicksPerWheel(ticksPerWheel);
+        // 初始化wheel数组
         HashedWheelBucket[] wheel = new HashedWheelBucket[ticksPerWheel];
         for (int i = 0; i < wheel.length; i ++) {
             wheel[i] = new HashedWheelBucket();
@@ -332,6 +333,7 @@ public class HashedWheelTimer implements Timer {
         return wheel;
     }
 
+    // 初始化ticksPerWheel的值为不小于ticksPerWheel的最小2的n次方
     private static int normalizeTicksPerWheel(int ticksPerWheel) {
         int normalizedTicksPerWheel = 1;
         while (normalizedTicksPerWheel < ticksPerWheel) {
@@ -347,7 +349,11 @@ public class HashedWheelTimer implements Timer {
      * @throws IllegalStateException if this timer has been
      *                               {@linkplain #stop() stopped} already
      */
+    // 启动时间轮。这个方法其实不需要显示的主动调用，因为在添加定时任务（newTimeout()方法）的时候会自动调用此方法。
+    // 这个是合理的设计，因为如果时间轮里根本没有定时任务，启动时间轮也是空耗资源
     public void start() {
+        // 判断当前时间轮的状态，如果是初始化，则启动worker线程，启动整个时间轮；如果已经启动则略过；如果是已经停止，则报错
+        // 这里是一个Lock Free的设计。因为可能有多个线程调用启动方法，这里使用AtomicIntegerFieldUpdater原子的更新时间轮的状态
         switch (WORKER_STATE_UPDATER.get(this)) {
             case WORKER_STATE_INIT:
                 if (WORKER_STATE_UPDATER.compareAndSet(this, WORKER_STATE_INIT, WORKER_STATE_STARTED)) {
@@ -362,7 +368,7 @@ public class HashedWheelTimer implements Timer {
                 throw new Error("Invalid WorkerState");
         }
 
-        // Wait until the startTime is initialized by the worker.
+        // 等待worker线程初始化时间轮的启动时间
         while (startTime == 0) {
             try {
                 startTimeInitialized.await();
@@ -374,13 +380,15 @@ public class HashedWheelTimer implements Timer {
 
     @Override
     public Set<Timeout> stop() {
+        // worker线程不能停止时间轮，也就是加入的定时任务，不能调用这个方法。
+        // 不然会有恶意的定时任务调用这个方法而造成大量定时任务失效
         if (Thread.currentThread() == workerThread) {
             throw new IllegalStateException(
                     HashedWheelTimer.class.getSimpleName() +
                             ".stop() cannot be called from " +
                             TimerTask.class.getSimpleName());
         }
-
+        // 尝试CAS替换当前状态为“停止：2”。如果失败，则当前时间轮的状态只能是“初始化：0”或者“停止：2”。直接将当前状态设置为“停止：2“
         if (!WORKER_STATE_UPDATER.compareAndSet(this, WORKER_STATE_STARTED, WORKER_STATE_SHUTDOWN)) {
             // workerState can be 0 or 2 at this moment - let it always be 2.
             if (WORKER_STATE_UPDATER.getAndSet(this, WORKER_STATE_SHUTDOWN) != WORKER_STATE_SHUTDOWN) {
@@ -396,9 +404,12 @@ public class HashedWheelTimer implements Timer {
 
         try {
             boolean interrupted = false;
+            //如果工作线程存活
             while (workerThread.isAlive()) {
+                //中断工作线程
                 workerThread.interrupt();
                 try {
+                    //工作线程加入本地线程
                     workerThread.join(100);
                 } catch (InterruptedException ignored) {
                     interrupted = true;
