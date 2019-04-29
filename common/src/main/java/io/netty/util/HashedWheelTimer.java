@@ -81,18 +81,24 @@ public class HashedWheelTimer implements Timer {
     static final InternalLogger logger =
             InternalLoggerFactory.getInstance(HashedWheelTimer.class);
 
+    //实例计数器
     private static final AtomicInteger INSTANCE_COUNTER = new AtomicInteger();
+    //实例过多警告值
     private static final AtomicBoolean WARNED_TOO_MANY_INSTANCES = new AtomicBoolean();
+    //实际数量限制
     private static final int INSTANCE_COUNT_LIMIT = 64;
     private static final long MILLISECOND_NANOS = TimeUnit.MILLISECONDS.toNanos(1);
+    //资源泄漏检测器
     private static final ResourceLeakDetector<HashedWheelTimer> leakDetector = ResourceLeakDetectorFactory.instance()
             .newResourceLeakDetector(HashedWheelTimer.class, 1);
-
+    //工作线程状态更新
     private static final AtomicIntegerFieldUpdater<HashedWheelTimer> WORKER_STATE_UPDATER =
             AtomicIntegerFieldUpdater.newUpdater(HashedWheelTimer.class, "workerState");
-
+    //泄漏值
     private final ResourceLeakTracker<HashedWheelTimer> leak;
+    //工作对象
     private final Worker worker = new Worker();
+    //工作线程
     private final Thread workerThread;
 
     public static final int WORKER_STATE_INIT = 0;
@@ -100,16 +106,23 @@ public class HashedWheelTimer implements Timer {
     public static final int WORKER_STATE_SHUTDOWN = 2;
     @SuppressWarnings({ "unused", "FieldMayBeFinal" })
     private volatile int workerState; // 0 - init, 1 - started, 2 - shut down
-
+    //tick的时长，也就是指针多久转一格
     private final long tickDuration;
+    //时间轮数组
     private final HashedWheelBucket[] wheel;
+    // 这是一个标示符，用来快速计算任务应该呆的格子。
     private final int mask;
+    //开始时间已初始化
     private final CountDownLatch startTimeInitialized = new CountDownLatch(1);
+    //任务队列
     private final Queue<HashedWheelTimeout> timeouts = PlatformDependent.newMpscQueue();
+    //关闭的任务队列
     private final Queue<HashedWheelTimeout> cancelledTimeouts = PlatformDependent.newMpscQueue();
+    //等待超时
     private final AtomicLong pendingTimeouts = new AtomicLong(0);
+    //最大等待超时
     private final long maxPendingTimeouts;
-
+    //开始时间
     private volatile long startTime;
 
     /**
@@ -306,8 +319,8 @@ public class HashedWheelTimer implements Timer {
         try {
             super.finalize();
         } finally {
-            // This object is going to be GCed and it is assumed the ship has sailed to do a proper shutdown. If
-            // we have not yet shutdown then we want to make sure we decrement the active instance count.
+            // 如果这个对象将被GC
+            // 我们尚未关闭然后我们想确保减少活动实例数. 通过原子减来保证实例逐个被关闭
             if (WORKER_STATE_UPDATER.getAndSet(this, WORKER_STATE_SHUTDOWN) != WORKER_STATE_SHUTDOWN) {
                 INSTANCE_COUNTER.decrementAndGet();
             }
@@ -513,6 +526,7 @@ public class HashedWheelTimer implements Timer {
                             wheel[idx];
                     // 从任务队列中取出任务加入到对应的格子中
                     transferTimeoutsToBuckets();
+                    System.out.println("bucket"+bucket+",idx"+idx);
                     // 过期执行格子中的任务
                     bucket.expireTimeouts(deadline);
                     tick++;
@@ -624,6 +638,7 @@ public class HashedWheelTimer implements Timer {
                 }
 
                 try {
+                    System.out.println("sleepTimeMs"+sleepTimeMs);
                     Thread.sleep(sleepTimeMs);
                 } catch (InterruptedException ignored) {
                     // 调用HashedWheelTimer.stop()时优雅退出
@@ -828,6 +843,7 @@ public class HashedWheelTimer implements Timer {
                 } else if (timeout.isCancelled()) {
                     next = remove(timeout);
                 } else {  //没有到期，轮数-1
+                    System.out.println("没有到期");
                     timeout.remainingRounds --;
                 }
                 // 先保存next，因为移除后next将被设置为null
@@ -867,7 +883,7 @@ public class HashedWheelTimer implements Timer {
         }
 
         /**
-         * Clear this bucket and return all not expired / cancelled {@link Timeout}s.
+         * 清除此存储桶并返回所有未过期/已取消 {@link Timeout}s.
          */
         public void clearTimeouts(Set<Timeout> set) {
             for (;;) {
