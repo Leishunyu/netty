@@ -875,6 +875,7 @@ public class HashedWheelTimer implements Timer {
                 tail = timeout.prev;
             }
             // null out prev, next and bucket to allow for GC.
+            // = null 帮助触发gc,如果没有jit的情况,局部变量表并不会在引用失效后,直接gc的,而会等待下一次覆盖看会不会对局部变量进行复用
             timeout.prev = null;
             timeout.next = null;
             timeout.bucket = null;
